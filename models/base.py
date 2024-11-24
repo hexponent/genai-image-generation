@@ -105,7 +105,7 @@ class TrainableModule(nn.Module):
             if epoch_n % 5 == 0:
                 torch.save(self.state_dict(), weights_path / f'{epoch_n}.pth')
 
-                predict = self(torch.unsqueeze(sample_image, 0).to(self.device))[0].detach().to('cpu')
+                predict, *other = self(torch.unsqueeze(sample_image, 0).to(self.device))[0].detach().to('cpu')
                 # save image example to tensorboard
                 writer.add_image('epoch_sample', predict, global_step=epoch_n)
 
