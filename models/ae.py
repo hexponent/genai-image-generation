@@ -1,9 +1,9 @@
 import torch
 
-from .base import TrainableModule
+from .base import TrainValidationTrainableModule
 
 
-class Autoencoder(TrainableModule):
+class Autoencoder(TrainValidationTrainableModule):
     loss = torch.nn.MSELoss()
 
     def __init__(self, name):
