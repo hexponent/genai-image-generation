@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 from pathlib import Path
 import re
@@ -5,6 +6,7 @@ import re
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
+import torchvision
 import tqdm
 
 
@@ -67,6 +69,7 @@ class TrainableModule(nn.Module):
         weights_path = self.weights_dir / self.name
         weights_path.mkdir(parents=True, exist_ok=True)
 
+        self.best_loss = float('inf')
         self._train_setup()
 
         for epoch_n in range(epoch_start, epochs + 1):
@@ -136,7 +139,6 @@ class TrainValidationTrainableModule(TrainableModule):
         return sum(epoch_losses) / len(epoch_losses)
 
     def _train_setup(self):
-        self.best_loss = float('inf')
         self.optimizer = torch.optim.Adam(
             self.parameters(),
             lr=1e-5, weight_decay=1e-8
@@ -162,3 +164,77 @@ class TrainValidationTrainableModule(TrainableModule):
         predict = res.squeeze().detach().to('cpu')
         # save image example to tensorboard
         self.writer.add_image('epoch_sample', predict, global_step=epoch_n)
+
+
+class AdversarialTrainableModule(TrainableModule):
+
+    def _train_setup(self):
+        self.optim_g = torch.optim.Adam(self.gen.parameters(), lr=0.0002, betas=(0.5, 0.999))
+        self.optim_d = torch.optim.Adam(self.dis.parameters(), lr=0.0002, betas=(0.5, 0.999))
+
+        if 'single_noise' not in self.extra_train_data:
+            raise ValueError('single_noise is required for adversarial training')
+        self.single_noise = self.extra_train_data['single_noise']
+
+        if 'multi_noise' not in self.extra_train_data:
+            raise ValueError('multi_noise is required for adversarial training')
+        self.multi_noise = self.extra_train_data['multi_noise']
+
+    def _epoch_sample_visualization(self, epoch_n):
+        predict = self.generate(self.single_noise).detach().to('cpu').squeeze(0)
+        # save image example to tensorboard
+        self.writer.add_image('epoch_sample', predict, global_step=epoch_n)
+        multi_predict = self.generate(self.multi_noise).detach()
+        torchvision.utils.save_image(multi_predict, f'images/fake_samples_{self.name}_epoch_{epoch_n}.png', normalize=True)
+
+    def train_batch(self, batch_data):
+        self.train()
+        ############################
+        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+        ###########################
+
+        # train with real
+        self.dis.zero_grad()
+        batch_size = batch_data.size(0)
+        batch_data = batch_data.to(self.device)
+        label = torch.full((batch_size,), 1, device=self.device).float()
+
+        output = self.dis(batch_data)
+        errD_real = self.loss(output, label)
+        errD_real.backward()
+
+        # train with fake
+        noise = torch.randn(batch_size, self.latent_dim, 1, 1, device=self.device)
+        fake = self.gen(noise)
+        label.fill_(0)
+        output = self.dis(fake.detach())
+        errD_fake = self.loss(output, label)
+        errD_fake.backward()
+        errD = errD_real + errD_fake
+        self.optim_d.step()
+
+        ############################
+        # (2) Update G network: maximize log(D(G(z)))
+        ###########################
+        self.gen.zero_grad()
+        label.fill_(1)  # fake labels are real for generator cost
+        output = self.dis(fake)
+        errG = self.loss(output, label)
+        errG.backward()
+        self.optim_g.step()
+
+        self.eval()
+
+        return {'generator': errG.item(), 'discriminator': errD.item()}
+
+    def _train_epoch(self):
+        epoch_losses = defaultdict(list)
+        for input_data, input_label in tqdm.tqdm(self.train_data):  # split in batches
+            loss_out = self.train_batch(input_data)
+            for loss_type, loss_value in loss_out.items():
+                epoch_losses[loss_type].append(loss_value)
+
+        return {
+            loss_type: sum(losses) / len(losses)
+            for loss_type, losses in epoch_losses.items()
+        }
