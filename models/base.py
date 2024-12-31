@@ -238,3 +238,26 @@ class AdversarialTrainableModule(TrainableModule):
             loss_type: sum(losses) / len(losses)
             for loss_type, losses in epoch_losses.items()
         }
+
+
+class ResidualBlock(nn.Module):
+    """Residual Block with BatchNorm and ReLU"""
+
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+        )
+        self.shortcut = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
+            nn.BatchNorm2d(out_channels)
+        )
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(self.conv(x) + self.shortcut(x))

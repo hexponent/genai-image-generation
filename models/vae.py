@@ -30,17 +30,25 @@ class VariationalAutoencoder(Autoencoder):
         self.loss = VLB(beta)
 
         del self.e_fc
-        self.fc_mu = nn.Linear(256 * 4 * 4, latent_dim)  # Mean for latent space
-        self.fc_logvar = nn.Linear(256 * 4 * 4, latent_dim)  # Log variance for latent space
+        self.fc_mu = nn.Linear(256 * 4 * 4, latent_dim)
+        self.fc_logvar = nn.Linear(256 * 4 * 4, latent_dim)
+
+    def encode(self, x):
+        h = self.encoder(x)
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        return mu, logvar
+
+    def reparameterize(self, mu, sigma):
+        eps = torch.randn_like(sigma)
+        z = mu + sigma * eps
+        return z
+
+    def decode(self, z):
+        return self.decoder(z)
 
     def forward(self, x):
-        features = self.encoder(x)
-
-        mu = self.fc_mu(features)
-        logvar = self.fc_logvar(features)
-        std = torch.exp(0.5 * logvar)
-        z = mu + std * torch.randn_like(std)
-
-        x_reconstructed = self.decode(z)
-
-        return x_reconstructed, mu, logvar
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        recon_x = self.decode(z)
+        return recon_x, mu, logvar
